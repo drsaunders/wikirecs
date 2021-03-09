@@ -12,6 +12,7 @@ from scipy.sparse import csr_matrix, csc_matrix
 import time
 from datetime import datetime
 import collections
+from sklearn.metrics import ndcg_score
 
 
 class Timer:
@@ -195,6 +196,9 @@ def print_user_history(all_histories, user=None, userid=None):
     else:
         raise ValueError("Either user or userid must be non-null")
 
+    if len(edits) == 0:
+        print("User not found")
+
     last_page = -1
     last_date = ""
     for i in range(len(edits))[::-1]:
@@ -240,7 +244,8 @@ def recall(test_set, recs, K=10, userid_subset=None):
         if userid_subset is not None:
             if not row.userid in userid_subset:
                 continue
-
+        if not row.userid in recs:
+            continue
         if np.isin(row.pageid, recs[row.userid][:K]):
             hits = hits + 1
         outof = outof + 1
@@ -249,28 +254,72 @@ def recall(test_set, recs, K=10, userid_subset=None):
 
 
 def ndcg(test_set, recs, K=10, userid_subset=None):
-    """For a test set, compute the % of users who have a hit in the top K.
+    test_set = test_set.drop(columns=["recs"], errors="ignore")
+    test_set = test_set.merge(
+        pd.DataFrame(
+            [(u, recs[u]) for u in test_set.userid], columns=["userid", "recs"]
+        ),
+        on="userid",
+    )
+    if userid_subset is None:
+        selected_rows = [True] * len(test_set)
+    else:
+        selected_rows = test_set.userid.isin(userid_subset)
+
+    y_true = [
+        (p == r[:K]).astype(int)
+        for p, r in zip(
+            test_set[selected_rows].pageid.values, test_set[selected_rows].recs.values
+        )
+    ]
+    dummy_y_score = len(test_set[selected_rows]) * [list(range(K))[::-1]]
+
+    test_set = test_set.drop(columns=["recs"])
+
+    ## Print the individual scores
+    # for yt in y_true:
+    #     print(
+    #         (
+    #             yt,
+    #             ndcg_score(
+    #                 np.array(yt, ndmin=2), np.array(list(range(K))[::-1], ndmin=2)
+    #             ),
+    #         )
+    #     )
+    return ndcg_score(y_true, dummy_y_score)
+
+
+def get_recs_metrics(
+    test_set, recs, K, discovery_userids, resurface_userids, implicit_matrix, i2p, u2i
+):
+    return {
+        "recall": 100 * recall(test_set, recs, K),
+        "ndcg": ndcg(test_set, recs, K),
+        "resurfaced": 100 * prop_resurface(recs, K, implicit_matrix, i2p, u2i),
+        "recall_discover": 100
+        * recall(test_set, recs, K, userid_subset=discovery_userids),
+        "recall_resurface": 100
+        * recall(test_set, recs, K, userid_subset=resurface_userids),
+        "ndcg_discover": ndcg(test_set, recs, K, userid_subset=discovery_userids),
+        "ndcg_resurface": ndcg(test_set, recs, K, userid_subset=resurface_userids),
+    }
+
+
+def prop_resurface(recs, K=10, implicit_matrix=None, i2p=None, u2i=None):
+    """What proportion of the top K recs are resurfaced pages (already edited by user)?
 
     Args:
-        test_set: DF with an entry for each user with the target edit-to-be-predicted
-        recs: Dict by userid of lists of pageid recs
-        K: Number of recs to consider when looking for a hit
-        userid_subset: Only compute for the userids in this list
 
     Returns:
-        float of the mean number of test entries with hits in the top K
+        float of the mean number of resurfaced pages in the top K recs
     """
-    hits = 0
-    outof = 0
+    prop_resurface = []
+    for userid in recs.keys():
+        past_pages = [i2p[i] for i in implicit_matrix[:, u2i[userid]].nonzero()[0]]
+        rec_pages = recs[userid][:K]
+        prop_resurface.append(np.mean(np.isin(rec_pages, past_pages)))
 
-    for _, row in test_set.iterrows():
-        if userid_subset is not None:
-            if not row.userid in userid_subset:
-                continue
-
-        hits = (row.pageid == np.array(recs[row.userid][:K])).astype(int)
-
-    return hits / float(outof)
+    return np.mean(prop_resurface)
 
 
 def display_recs_with_history(

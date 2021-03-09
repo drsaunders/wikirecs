@@ -49,6 +49,21 @@ class MostRecentRecommender(Recommender):
                 .user.sort_values(ascending=False)
             )
 
+    def all_recent_only(self, N=10, userids=None, interactions=None):
+        recents = {}
+
+        with tqdm(total=len(userids)) as progress:
+            for u in userids:
+                is_user_row = interactions.userid == u
+                recents[u] = (
+                    interactions[is_user_row]
+                    .drop_duplicates(subset=["pageid"])
+                    .iloc[:N]
+                    .pageid.values
+                )
+                progress.update(1)
+        return recents
+
     def recommend(self, N=10, userid=None, user=None, interactions=None):
         if user is not None:
             is_user_row = interactions.user == user
@@ -138,3 +153,138 @@ class ImplicitCollaborativeRecommender(Recommender):
         recs = [i2p[a[0]] for a in recs_indices]
 
         return recs
+
+
+class JaccardRecommender(Recommender):
+    def __init__(self, implicit_matrix, p2i, t2i, i2t, i2p, n2i, u2i, i2u):
+        self.implicit_matrix = implicit_matrix
+        self.p2i = p2i
+        self.t2i = t2i
+        self.i2t = i2t
+        self.i2p = i2p
+        self.n2i = n2i
+        self.i2p = i2p
+        self.u2i = u2i
+        self.i2u = i2u
+
+    def jaccard_multiple(self, page_indices, exclude_index=None):
+        X = self.implicit_matrix.astype(bool).astype(int)
+        if exclude_index is None:
+            intrsct = X.dot(X[page_indices, :].T)
+            totals = X[page_indices, :].sum(axis=1).T + X.sum(axis=1)
+        else:
+            use_indices = np.full(X.shape[1], True)
+            use_indices[exclude_index] = False
+            # print(X[:, use_indices].shape)
+            # print(X[page_indices, :][:, use_indices].T.shape)
+
+            intrsct = X[:, use_indices].dot(X[page_indices, :][:, use_indices].T)
+            totals = X[page_indices, :][:, use_indices].sum(axis=1).T + X[
+                :, use_indices
+            ].sum(axis=1)
+
+        return intrsct / (totals - intrsct)
+
+    def recommend(
+        self,
+        N=10,
+        userid=None,
+        user=None,
+        num_lookpage_pages=None,
+        recent_pages_dict=None,
+        interactions=None,
+    ):
+        if user is not None:
+            user_index = self.n2i[user]
+        elif userid is not None:
+            user_index = self.u2i[userid]
+        else:
+            raise ValueError("Either user or userid must be non-null")
+
+        recent_pages = recent_pages_dict[self.i2u[user_index]][:num_lookpage_pages]
+
+        user_page_indices = [self.p2i[p] for p in recent_pages]
+        d = self.jaccard_multiple(user_page_indices, exclude_index=user_index)
+
+        d = np.nan_to_num(d)
+        d[d == 1] = np.nan
+
+        mean_jaccard = np.nanmean(d, axis=1).A.squeeze()
+        order = np.argsort(mean_jaccard)[::-1]
+        return [self.i2p[o] for o in order[:N]]
+
+    def item_to_item(self, N=10, title=None, pageid=None):
+        if title is not None:
+            page_index = self.t2i.get(title, None)
+        elif pageid is not None:
+            page_index = self.p2i.get(pageid, None)
+        else:
+            raise ValueError("Either title or pageid must be non-null")
+
+        if page_index is None:
+            raise ValueError(
+                "Page {} not found".format(pageid if title is None else title)
+            )
+
+        target_page_editors = np.flatnonzero(
+            self.implicit_matrix[page_index, :].toarray()
+        )
+        # print("target_page_editors {}".format(target_page_editors))
+
+        num_target_editors = len(target_page_editors)
+
+        edited_indices = np.flatnonzero(
+            np.sum(self.implicit_matrix[:, target_page_editors] > 0, axis=1)
+        )
+
+        # print("edited_indices {}".format(edited_indices))
+
+        num_shared_editors = np.asarray(
+            np.sum(self.implicit_matrix[:, target_page_editors] > 0, axis=1)[
+                edited_indices
+            ]
+        ).squeeze()
+
+        # print("num_shared_editors {}".format(num_shared_editors))
+
+        num_item_editors = np.asarray(
+            np.sum(self.implicit_matrix[edited_indices, :] > 0, axis=1)
+        ).squeeze()
+
+        # print("num_item_editors {}".format(num_item_editors))
+        # print("Type num_item_editors {}".format(type(num_item_editors)))
+        # print("num_item_editors dims {}".format(num_item_editors.shape))
+
+        jaccard_scores = (
+            num_shared_editors.astype(float)
+            / ((num_target_editors + num_item_editors) - num_shared_editors)
+        ).squeeze()
+
+        # print("jaccard_scores {}".format(jaccard_scores))
+
+        sorted_order = np.argsort(jaccard_scores)
+        sorted_order = sorted_order.squeeze()
+
+        rec_indices = edited_indices.squeeze()[sorted_order][::-1]
+        sorted_scores = jaccard_scores.squeeze()[sorted_order][::-1]
+        sorted_num_shared_editors = num_shared_editors.squeeze()[sorted_order][::-1]
+        sorted_num_item_editors = num_item_editors.squeeze()[sorted_order][::-1]
+
+        if title is None:
+            return list(
+                zip(
+                    [self.i2p[i] for i in rec_indices[:N]],
+                    sorted_scores[:N],
+                    sorted_num_shared_editors[:N],
+                    sorted_num_item_editors[:N],
+                )
+            )
+        else:
+            return list(
+                zip(
+                    [self.i2t[i] for i in rec_indices[:N]],
+                    sorted_scores[:N],
+                    sorted_num_shared_editors[:N],
+                    sorted_num_item_editors[:N],
+                )
+            )
