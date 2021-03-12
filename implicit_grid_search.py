@@ -3,26 +3,26 @@ import wikirecs as wr
 import itertools
 import implicit
 import recommenders
+from pyarrow import feather
 
-
-histories_test = wr.load_pickle("../histories_test.pickle")
+histories_test = feather.read_feather("../histories_dev.feather")
 
 implicit_matrix = wr.load_pickle("../implicit_matrix.pickle")
 p2t, t2p, u2n, n2u, p2i, u2i, i2p, i2u, n2i, t2i, i2n, i2t = wr.load_pickle(
     "../lookup_tables.pickle"
 )
 
-userids, pageids = wr.load_pickle("users_and_pages.pickle")
+userids, pageids = wr.load_pickle("../users_and_pages.pickle")
 
 resurface_userids, discovery_userids = wr.load_pickle(
-    "resurface_discovery_users.pickle"
+    "../resurface_discovery_users.pickle"
 )
 
 # regularization_levels = [0.001, 0.01, 0.1, 1, 10, 100, 1000]
 # num_factors_levels = [10, 50, 100]
 
 
-regularization_levels = [0.01, 0.1, 1, 10]
+regularization_levels = [0.001, 0.01, 0.1]
 num_factors_levels = [250, 500]
 
 
@@ -62,4 +62,4 @@ for num_factors, regularization in itertools.product(
 
     runs.append(run_record)
 
-    wr.save_pickle(runs, "implicit_grid_search.pickle")
+    wr.save_pickle(runs, "../implicit_grid_search.pickle")
