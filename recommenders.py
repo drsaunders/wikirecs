@@ -1,6 +1,9 @@
 import wikirecs as wr
 import numpy as np
 from tqdm.auto import tqdm
+import itertools
+import pandas as pd
+from implicit.nearest_neighbours import BM25Recommender
 
 
 class Recommender(object):
@@ -12,7 +15,7 @@ class Recommender(object):
 
     def recommend_all(self, userids, num_recs, **kwargs):
         recs = {}
-        with tqdm(total=len(userids)) as progress:
+        with tqdm(total=len(userids), leave=True) as progress:
             for u in userids:
                 recs[u] = self.recommend(userid=u, N=num_recs, **kwargs)
                 progress.update(1)
@@ -52,7 +55,7 @@ class MostRecentRecommender(Recommender):
     def all_recent_only(self, N=10, userids=None, interactions=None):
         recents = {}
 
-        with tqdm(total=len(userids)) as progress:
+        with tqdm(total=len(userids), leave=True) as progress:
             for u in userids:
                 is_user_row = interactions.userid == u
                 recents[u] = (
@@ -72,12 +75,12 @@ class MostRecentRecommender(Recommender):
         else:
             raise ValueError("Either user or userid must be non-null")
 
-        recs = (
-            interactions[is_user_row]
-            .drop_duplicates(subset=["pageid"])
-            .iloc[:N]
-            .pageid.values
-        )
+        deduped_pages = interactions[is_user_row].drop_duplicates(subset=["pageid"])
+        if len(deduped_pages) == 1:
+            recs = []
+        else:
+            # Don't take the most recent, because this dataset strips out repeated instance
+            recs = deduped_pages.iloc[1:N].pageid.values
 
         # If we've run out of recs, fill the rest with the most popular entries
         if len(recs) < N:
@@ -141,7 +144,16 @@ class ImplicitCollaborativeRecommender(Recommender):
         self.model = model
         self.implicit_matrix = implicit_matrix
 
-    def recommend(self, N=10, userid=None, user=None, u2i=None, n2i=None, i2p=None):
+    def recommend(
+        self,
+        N=10,
+        userid=None,
+        user=None,
+        u2i=None,
+        n2i=None,
+        i2p=None,
+        filter_already_liked_items=False,
+    ):
         if user is not None:
             user_index = n2i[user]
         elif userid is not None:
@@ -149,8 +161,62 @@ class ImplicitCollaborativeRecommender(Recommender):
         else:
             raise ValueError("Either user or userid must be non-null")
 
-        recs_indices = self.model.recommend(user_index, self.implicit_matrix, N)
+        recs_indices = self.model.recommend(
+            user_index,
+            self.implicit_matrix,
+            N,
+            filter_already_liked_items=filter_already_liked_items,
+        )
         recs = [i2p[a[0]] for a in recs_indices]
+
+        return recs
+
+    def recommend_all(self, userids, num_recs, i2p, filter_already_liked_items=True):
+        all_recs = self.model.recommend_all(
+            self.implicit_matrix.T,
+            num_recs,
+            filter_already_liked_items=filter_already_liked_items,
+        )
+        recs = {
+            userid: [i2p[i] for i in all_recs[i, :]] for i, userid in enumerate(userids)
+        }
+
+        return recs
+
+
+class MyBM25Recommender(Recommender):
+    def __init__(self, model, implicit_matrix):
+        self.model = model
+
+        self.implicit_matrix = implicit_matrix
+
+    def recommend(
+        self,
+        N=10,
+        filter_already_liked_items=True,
+        userid=None,
+        user=None,
+        u2i=None,
+        n2i=None,
+        i2p=None,
+    ):
+        if user is not None:
+            user_index = n2i[user]
+        elif userid is not None:
+            user_index = u2i[userid]
+        else:
+            raise ValueError("Either user or userid must be non-null")
+
+        recs_indices = self.model.recommend(
+            user_index,
+            self.implicit_matrix.astype(np.float32),
+            N,
+            filter_already_liked_items=filter_already_liked_items,
+        )
+        recs = [i2p[a[0]] for a in recs_indices]
+
+        if len(recs) <= 20:
+            recs = recs + [recs[-1]] * (20 - len(recs))
 
         return recs
 
@@ -288,3 +354,31 @@ class JaccardRecommender(Recommender):
                     sorted_num_item_editors[:N],
                 )
             )
+
+
+class InterleaveRecommender(Recommender):
+    """
+    Recommend for users by interleaving recs from multiple lists. When there is
+    duplicates keeping only the first instance.
+    """
+
+    def __init__(self):
+        pass
+
+    def recommend_all(self, N=10, recs_list=[]):
+        """
+        Args:
+            N (int): Number of recs to return
+            recs_list: Array of recs, which are ordered lists of pageids in a dict keyed by a userid
+
+        Returns:
+            dict: Recommendations, as a list of pageids keyed by userid
+        """
+
+        def merge_page_lists(page_lists):
+            return pd.unique(list(itertools.chain(*zip(*page_lists))))
+
+        return {
+            userid: merge_page_lists([recs.get(userid, []) for recs in recs_list])[:N]
+            for userid in recs_list[0]
+        }

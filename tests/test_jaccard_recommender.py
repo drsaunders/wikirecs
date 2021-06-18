@@ -1,3 +1,8 @@
+import sys
+import pathlib
+
+sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
+
 from repo.recommenders import JaccardRecommender
 import numpy as np
 from scipy.sparse.csc import csc_matrix

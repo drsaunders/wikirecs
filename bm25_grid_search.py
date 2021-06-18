@@ -4,11 +4,7 @@ import itertools
 import implicit
 import recommenders
 from pyarrow import feather
-import os
-from implicit.nearest_neighbours import bm25_weight
-
-os.environ["OPENBLAS_NUM_THREADS"] = "1"
-
+from implicit.nearest_neighbours import BM25Recommender
 
 histories_test = feather.read_feather("../histories_dev.feather")
 
@@ -24,31 +20,38 @@ resurface_userids, discovery_userids = wr.load_pickle(
 )
 
 # regularization_levels = [0.001, 0.01, 0.1, 1, 10, 100, 1000]
-num_factors_levels = [50, 100, 200]
+# num_factors_levels = [10, 50, 100]
 
 
-regularization_levels = [0.001, 0.01, 0.1]
-# num_factors_levels = [250, 500]
-
+K1_levels = [10, 20, 50, 100, 200]
+B_levels = [0, 0.25, 0.5, 0.75, 1]
+filter_already_liked_items_levels = [True, False]
 
 K = 20
 
 runs = []
-for num_factors, regularization in itertools.product(
-    num_factors_levels, regularization_levels
+for K1, B, filter_already_liked_items in itertools.product(
+    K1_levels, B_levels, filter_already_liked_items_levels
 ):
-    print((num_factors, regularization))
+    print((K1, B, filter_already_liked_items))
     start_time = time()
 
-    model = implicit.als.AlternatingLeastSquares(
-        factors=num_factors, regularization=regularization
-    )
+    model = BM25Recommender(K1, B)
     model.fit(implicit_matrix)
-    irec = recommenders.ImplicitCollaborativeRecommender(model, implicit_matrix)
-    irecs = irec.recommend_all(userids, K, u2i=u2i, n2i=n2i, i2p=i2p)
+
+    brec = recommenders.MyBM25Recommender(model, implicit_matrix)
+    brecs = brec.recommend_all(
+        userids,
+        K,
+        u2i=u2i,
+        n2i=n2i,
+        i2p=i2p,
+        filter_already_liked_items=filter_already_liked_items,
+    )
+    print("Computing metrics...")
     metrics = wr.get_recs_metrics(
         histories_test,
-        irecs,
+        brecs,
         K,
         discovery_userids,
         resurface_userids,
@@ -58,8 +61,8 @@ for num_factors, regularization in itertools.product(
     )
 
     run_record = {
-        "num_factors": num_factors,
-        "regularization": regularization,
+        "K1": K1,
+        "B": B,
         "metrics": metrics,
         "time": time() - start_time,
     }
@@ -67,4 +70,4 @@ for num_factors, regularization in itertools.product(
 
     runs.append(run_record)
 
-    wr.save_pickle(runs, "../implicit_grid_search.pickle")
+    wr.save_pickle(runs, "../bm25_grid_search.pickle")
