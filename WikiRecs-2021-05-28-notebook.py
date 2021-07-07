@@ -42,7 +42,7 @@ import plotly.express as px
 from pyarrow import feather
 import itertools
 from itables import show
-
+import matplotlib
 
 from implicit.nearest_neighbours import (
     bm25_weight)
@@ -82,16 +82,16 @@ len(all_histories.pageid.unique())
 
 # # Load all_histories (raw data), transform and split 
 
-# %%time
-all_histories = feather.read_feather("all_histories_2021-05-28.feather")
-
-print("Length raw edit history data: {}".format(len(all_histories)))
-
 # +
 # %%time
 all_histories = feather.read_feather("all_histories_2021-05-28.feather")
 
 print("Length raw edit history data: {}".format(len(all_histories)))
+# -
+
+all_histories.loc[all_histories.user=="Rama",["user","title","timestamp"]].sort_values("timestamp",ascending=False)
+
+wr.print_user_history(all_histories, user="Rama")
 
 # +
 from pull_edit_histories import get_edit_history
@@ -472,6 +472,13 @@ wr.save_pickle(model, '../bm25_model_2021-05-28.pkl')
 results = model.similar_items(t2i['Mark Hamill'],20)
 ['%s %.4f' % (i2t[ind], score) for ind, score in results]
 
+a = ['Steven Universe 429.4746',
+ 'List of Steven Universe episodes 178.4544',
+ 'Demon Bear 128.7237',
+ 'Legion of Super Heroes (TV series) 128.7237',
+ 'The Amazing World of Gumball 126.3522',
+ 'Steven Universe Future 123.9198']
+
 results = model.similar_items(t2i['Steven Universe'],20)
 ['%s %.4f' % (i2t[ind], score) for ind, score in results]
 
@@ -703,12 +710,12 @@ p2t, t2p, u2n, n2u, p2i, u2i, i2p, i2u, n2i, t2i, i2n, i2t = wr.load_pickle('../
 
 userids, pageids = wr.load_pickle('../users_and_pages_2021-05-28.pickle')
 
-
-# -
-
 resurface_userids, discovery_userids   = wr.load_pickle('../resurface_discovery_users_2021-05-28.pickle')
 
 results = {}
+
+
+# -
 
 wr.display_recs_with_history(
     recs,
@@ -796,8 +803,14 @@ brecs_filtered = brec.recommend_all(userids, K, u2i=u2i, n2i=n2i, i2p=i2p, filte
 wr.save_pickle(brecs_filtered, "../" + rec_name +"_recs.pickle")
 
 
+recs.keys()
+
 results[rec_name] = wr.get_recs_metrics(
-    histories_dev, brecs, K, discovery_userids, resurface_userids, implicit_matrix, i2p, u2i)
+    histories_dev, recs['bm25_filtered'], K, discovery_userids, resurface_userids, implicit_matrix, i2p, u2i)
+results[rec_name]
+
+results[rec_name] = wr.get_recs_metrics(
+    histories_dev, recs['bm25_filtered'], K, discovery_userids, resurface_userids, implicit_matrix, i2p, u2i)
 results[rec_name]
 
 # ## Implicit collaborative filtering
@@ -821,6 +834,30 @@ results[rec_name]
 rec_name = "als_filtered"
 wr.get_recs_metrics(
     histories_dev, irecs, K, discovery_userids, resurface_userids, bm25_matrix.tocsc(), i2p, u2i)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -951,6 +988,7 @@ results[rec_name]
 
 # ## Hard coded metrics
 
+# +
 results = {}
 results["Popularity"] = {'recall': 0.16187274312040842,
  'ndcg': 0.0005356797596941751,
@@ -973,54 +1011,119 @@ results["Frequent"] = {'recall': 20.834889802017184,
  'recall_resurface': 70.17635943732941,
  'ndcg_discover': 9.90570471847343e-05,
  'ndcg_resurface': 0.38274923359395385}
-results["Implicit"] = {'recall': 5.488108579255385,
+results["ALS"] = {'recall': 5.488108579255385,
  'ndcg': 0.026193145556306998,
  'resurfaced': 16.251556468683848,
  'recall_discover': 1.146119125586335,
  'recall_resurface': 15.788368675204703,
  'ndcg_discover': 0.004817135435898367,
  'ndcg_resurface': 0.0769022655123215}
-results["Implicit_filtered"] = {'recall': 0.9027518366330469,
+results["ALS_filtered"] = {'recall': 0.9027518366330469,
  'ndcg': 0.003856703716094881,
  'resurfaced': 0.0,
  'recall_discover': 1.2832994070271706,
  'recall_resurface': 0.0,
  'ndcg_discover': 0.005482465270193466,
  'ndcg_resurface': 0.0}
-results["bm25"] = {'recall': 18.945336819823186,
+results["BM25"] = {'recall': 18.945336819823186,
  'ndcg': 0.1015175508656068,
  'resurfaced': 74.0469742248786,
  'recall_discover': 1.3939286662536507,
  'recall_resurface': 60.581566239764854,
  'ndcg_discover': 0.004204510293040833,
  'ndcg_resurface': 0.332367864833573}
-results["bm25_filtered"] = {'recall': 1.0993992972911708,
- 'ndcg': 0.004864465753718907,
- 'resurfaced': 0.21421285277116625,
- 'recall_discover': 1.7235188509874326,
- 'recall_resurface': 0.03074085459575776,
- 'ndcg_discover': 0.007525885340226556,
- 'ndcg_resurface': 0.0003074085459575776}
-results["interleaved"] = {'recall': 21.382766778732414,
+results["BM25_filtered"] = {'recall': 1.8148424853691942,
+ 'ndcg': 0.008622285155255174,
+ 'resurfaced': 0.14848711243929774,
+ 'recall_discover': 2.522347110363749,
+ 'recall_resurface': 0.1364686122191896,
+ 'ndcg_discover': 0.011740495141426633,
+ 'ndcg_resurface': 0.0012251290280766518}
+results["Interleaved"] = {'recall': 21.382766778732414,
  'ndcg': 0.12924273396038563,
  'resurfaced': 42.478676379031256,
  'recall_discover': 1.8364457031595716,
  'recall_resurface': 67.75141717404996,
  'ndcg_discover': 0.006943981897312752,
  'ndcg_resurface': 0.4193652616867473}
-
-
-# ## Table of results
-
-# +
 results_df = pd.DataFrame(results).T
 
 results_df.reset_index(inplace=True)
 # -
 
+
+# ## Table of results
+
 results_df
 
-results_df.sort_values("ndcg")
+results_df.sort_values("ndcg_discover")
+
+
+# ### FIG Table for post
+
+# +
+def scatter_text(x, y, text_column, data, title, xlabel, ylabel):
+    """Scatter plot with country codes on the x y coordinates
+       Based on this answer: https://stackoverflow.com/a/54789170/2641825"""
+    
+    # Create the scatter plot
+    p1 = sns.scatterplot(x, y, data=data, size = 8, legend=False)
+    # Add text besides each point
+    for line in range(0,data.shape[0]):
+         p1.text(data[x][line]+0.01, data[y][line], 
+                 data[text_column][line], horizontalalignment='left', 
+                 size='medium', color='black', weight='semibold')
+    # Set title and axis labels
+    plt.title(title)
+    plt.xlabel(xlabel)
+    plt.ylabel(ylabel)
+    return p1
+
+
+def highlight_max(s):
+    '''
+    highlight the maximum in a Series yellow.
+    '''
+    is_max = s == s.max()
+    return ['background-color: yellow' if v else '' for v in is_max]
+
+
+
+results_df.sort_values("recall", ascending=False).style.apply(highlight_max, subset=["recall",
+                                                                                    "ndcg",
+                                                                                    "resurfaced",
+                                                                                    "recall_discover",
+                                                                                    "recall_resurface",
+                                                                                    "ndcg_discover",
+                                                                                    "ndcg_resurface",]).format({"recall": "{:.1f}%", 
+                                             "ndcg": "{:.3f}",
+                                             "resurfaced": "{:.1f}%", 
+                                             "recall_discover": "{:.1f}%", 
+                                              "recall_resurface": "{:.1f}%", 
+                                            "ndcg_discover": "{:.3f}",
+                                              "ndcg_resurface": "{:.3f}",
+                                             })
+# -
+
+colnames = ["Recommender", "Recall@20", "nDCG@20","Resurfaced","Recall@20 discovery","Recall@20 resurface","nDCG@20 discovery","nDCG@20 resurface"]
+#apply(highlight_max, subset=colnames[1:]).
+results_df.columns = colnames
+results_df.sort_values("Recall@20", ascending=False).style.\
+    format({"Recall@20": "{:.1f}%", 
+             "nDCG@20": "{:.3f}",
+             "Resurfaced": "{:.1f}%", 
+             "Recall@20 discovery": "{:.1f}%", 
+             "Recall@20 resurface": "{:.1f}%", 
+             "nDCG@20 discovery": "{:.3f}",
+             "nDCG@20 resurface": "{:.3f}",
+             })
+
+# ## Scatter plots (resurface vs discover)
+
+implicit_matrix.shape
+
+
+
 
 fig = px.scatter(data_frame=results_df,
                  x='ndcg_discover',
@@ -1036,19 +1139,83 @@ fig = px.scatter(data_frame=results_df,
 #                  hover_name='title',)
 fig.show()
 
+# ### FIG Scatterplot for post
+
+results_df
+
+x = 2*[results_df.loc[results_df.Recommender == "Interleaved","Recall@20 resurface"].values[0]]
+y = [0, results_df.loc[results_df.Recommender == "Interleaved","Recall@20 discovery"].values[0]]
+
+
+
+
+# +
+sns.set_theme(style="darkgrid")
+matplotlib.rcParams.update({'font.size': 48, 'figure.figsize':(8,5), 'legend.edgecolor':'k'})
+
+
+plt.figure(figsize=(12,7))
+A = results_df.loc[:,'Recall@20 discovery']
+B = results_df.loc[:,'Recall@20 resurface']
+
+x = 2*[results_df.loc[results_df.Recommender == "Interleaved","Recall@20 discovery"].values[0]]
+y = [-1, results_df.loc[results_df.Recommender == "Interleaved","Recall@20 resurface"].values[0]]
+plt.plot(x,y,":k")
+x[0] = 0
+y[0] = y[1]
+# plt.rcParams.update({'font.size': 48})
+plt.rc('xtick', labelsize=3)
+
+font = {'family' : 'normal',
+        'weight' : 'normal',
+        'size'   : 22}
+
+matplotlib.rc('font', **font)
+
+plt.plot(x,y,":k")
+
+plt.plot(A,B,'.', MarkerSize=15)
+
+
+for xyz in zip(results_df.Recommender, A, B):                                       # <--
+    plt.gca().annotate('%s' % xyz[0], xy=np.array(xyz[1:])+(0.05,0), textcoords='data', fontsize=18) # <--
+
+for tick in plt.gca().xaxis.get_major_ticks():
+    tick.label.set_fontsize(20)
+for tick in plt.gca().yaxis.get_major_ticks():
+    tick.label.set_fontsize(20)
+
+plt.xlabel("Recall@20 discovery (%)",fontsize=20)
+plt.ylabel("Recall@20 resurface (%)",fontsize=20)
+plt.xlim([0,3])
+plt.ylim([-2,85])
+axes = plt.gca()
+
+# +
+for xyz in zip(results_df.Recommender, A, B):                                       # <--
+    plt.gca().annotate('%s (%.1f, %.1f)' % xyz, xy=np.array(xyz[1:])+(0.05,0), textcoords='data') # <--
+
+plt.xlabel("Recall@20 discovery (%)")
+plt.ylabel("Recall@20 resurface (%))")
+plt.xlim([0,3])
+# -
+
 # ## Read recs in from files
 
-recommender_names = ['Popularity', 'Recent', 'Frequent', 'Implicit', 'Implicit_filtered', 'bm25', 'bm25_filtered', 'interleaved']
+recommender_names = ['Popularity', 'Recent', 'Frequent', 'ALS', 'ALS_filtered', 'BM25', 'BM25_filtered', 'Interleaved']
 
 recs = {rname:wr.load_pickle("../" + rname + "_recs.pickle") for rname in recommender_names}
 
-# ## FIG Recall curves
+# ## Recall curves
 
 histories_dev = feather.read_feather('../histories_dev_2021-05-28.feather')
+
+recommender_names
 
 plt.figure(figsize=(15,10))
 for rname in recommender_names:
     recall_curve = wr.recall_curve(histories_dev, recs[rname], 20)
+#     print(recall_curve[-1])
     plt.plot(recall_curve,'.-')
 plt.legend(recommender_names)
 
@@ -1064,18 +1231,38 @@ for rname in recommender_names:
     plt.plot(recall_curve,'.-')
 plt.legend(recommender_names)
 
+# ### FIG Implicit vs BM25 figure
+
+sns.set_theme(style="darkgrid")
+matplotlib.rcParams.update({'font.size': 18, 'figure.figsize':(8,5), 'legend.edgecolor':'k'})
+plt.figure(figsize=(10,6))
+for rname in ["ALS","BM25"]:
+    recall_curve = wr.recall_curve(histories_dev, recs[rname], 20, discovery_userids)
+    plt.plot(np.array(recall_curve)*100,'.-',markersize=12)
+plt.legend( ["ALS","BM25"],title="Algorithm", fontsize=16, title_fontsize=16, facecolor="w")
+plt.xlabel("@N",fontsize=20)
+plt.ylabel("Discovery recall (%)",fontsize=20)
+_ = plt.xticks(np.arange(0,20,2),np.arange(0,20,2)+1)
+# plt.gca().legend(prop=dict(size=20))
+for tick in plt.gca().xaxis.get_major_ticks():
+    tick.label.set_fontsize(20)
+for tick in plt.gca().yaxis.get_major_ticks():
+    tick.label.set_fontsize(20)
+
+
 # # User recommendation comparison
 
 recommender_names
 
 
-recs_subset = ["Recent","Frequent","Popularity","Implicit","Implicit_filtered","bm25","bm25_filtered"]
+recs_subset = ["Recent","Frequent","Popularity","Implicit","bm25","interleaved"]
 
 N=10
 
+print("Next edit: " + histories_dev.loc[histories_dev.userid == userid].title.values[0])
 
 
-
+# ## FIG Rama table
 
 # +
 def bold_viewed(val, viewed_pages):
@@ -1096,27 +1283,42 @@ def color_target(val, target_page):
     color = 'red' if val ==  target_page else 'black'
     return 'color: %s' % color
 
-
-
-# -
-
-print("Next edit: " + histories_dev.loc[histories_dev.userid == userid].title.values[0])
-
-
-s.st
-
-
 def display_user_recs_comparison(user_name, recs, recs_subset, train_set, test_set, N=20):
     userid = n2u[user_name]
     recs_table = pd.DataFrame({rec_name: [p2t[r] for r in recs[rec_name][userid][:N]] for rec_name in recs_subset})
+    recs_table = recs_table.reset_index()
+    recs_table.loc[:,"index"] = recs_table.loc[:,"index"]+1
+    recs_table = recs_table.rename(columns={"index":""})
     viewed_pages = train_set.loc[train_set.userid == userid,["title"]].drop_duplicates(subset=["title"]).values.squeeze()
     target_page = test_set.loc[test_set.userid == userid].title.values[0]
-    print("Next edit: " + target_page)
+#     print("Next edit: " + target_page)
     s = recs_table.style.applymap(bold_viewed, viewed_pages=viewed_pages).applymap(color_target, target_page=target_page)
     display(s)
 
 
+# +
+recs_subset = ["Recent","Frequent","Popularity","ALS","ALS_filtered","BM25","BM25_filtered"]
+
+display_user_recs_comparison('Rama', recs, recs_subset, histories_train, histories_dev, N=10)
+# -
+
+# ## Other individuals tables
+
+display_user_recs_comparison('Meow', recs, recs_subset, histories_train, histories_dev, N=10)
+
+display_user_recs_comparison('KingArti', recs, recs_subset, histories_train, histories_dev, N=10)
+
+display_user_recs_comparison('Tulietto', recs, recs_subset, histories_train, histories_dev, N=10)
+
 display_user_recs_comparison('Thornstrom', recs, recs_subset, histories_train, histories_dev, N=10)
+
+# ## FIG Interleaved
+
+display_user_recs_comparison('Rama', recs,['Interleaved'], histories_train, histories_dev, N=10)
+
+display_user_recs_comparison('Rama', recs,['interleaved'], histories_train, histories_dev, N=10)
+
+display_user_recs_comparison('KingArti', recs,['Interleaved'], histories_train, histories_dev, N=10)
 
 display(pd.DataFrame({rec_name: [p2t[r] for r in recs[rec_name][n2u['Rama']]][:N] for rec_name in recs_subset}))
 
@@ -1359,8 +1561,6 @@ import itertools
 clean_histories.head()
 
 clean_histories.iloc[:1000].values.tolist()
-
-x
 
 clean_histories.columns
 
